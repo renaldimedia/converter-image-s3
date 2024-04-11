@@ -26,10 +26,6 @@ Before running the script, ensure the following are set up:
 ## Setup
 
 1. **Clone the Repository:**
-```bash
-git clone https://github.com/yourusername/your-repo.git
-cd your-repo
-```
 
 2. **Install Dependencies:**
 ```bash
