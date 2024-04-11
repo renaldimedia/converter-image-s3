@@ -8,5 +8,6 @@ CREATE TABLE `converted_files` (
   `filepath` text DEFAULT NULL,
   `endpoint` varchar(255) NOT NULL,
   `bucket` varchar(100) DEFAULT NULL,
+  `size_after` bigint(20) unsigned DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=5535 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

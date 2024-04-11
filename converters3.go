@@ -158,7 +158,7 @@ func main() {
 				}
 
 				// Track the converted file in MariaDB
-				_, err = db.Exec("INSERT INTO converted_files (filename, filepath, size, converted_time, endpoint, bucket) VALUES (?, ?, ?, ?, ?, ?)", obj.Key, filepath.Join(s3Folder, obj.Key), obj.Size, time.Now(), s3Endpoint, s3Bucket)
+				_, err = db.Exec("INSERT INTO converted_files (filename, filepath, size, converted_time, endpoint, bucket, size_after) VALUES (?, ?, ?, ?, ?, ?, ?)", obj.Key, filepath.Join(s3Folder, obj.Key), obj.Size, time.Now(), s3Endpoint, s3Bucket, int64(webpBytes.Len()))
 				if err != nil {
 					log.Fatal(err)
 				}
