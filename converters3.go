@@ -29,6 +29,8 @@ type TrackRecord struct {
 	Filepath      string
 	Size          int64
 	ConvertedTime time.Time
+	Endpoint      string
+	Bucket        string
 }
 
 func main() {
@@ -45,12 +47,12 @@ func main() {
 		log.Fatalf("Some error occurred. Err: %s", err)
 	}
 
-	// Wasabi settings
-	wasabiEndpoint := os.Getenv("S3_ENDPOINT")
-	wasabiAccessKey := os.Getenv("S3_ACCESS_KEY")
-	wasabiSecretKey := os.Getenv("S3_SECRET_KEY")
-	wasabiBucket := "halorumah"
-	wasabiFolder := "wp-content" // Folder containing images to convert
+	// s3 settings
+	s3Endpoint := os.Getenv("S3_ENDPOINT")
+	s3AccessKey := os.Getenv("S3_ACCESS_KEY")
+	s3SecretKey := os.Getenv("S3_SECRET_KEY")
+	s3Bucket := "halorumah"
+	s3Folder := "wp-content" // Folder containing images to convert
 
 	// Initialize MariaDB connection
 	db, err := sql.Open("mysql", os.Getenv("MYSQL_URL"))
@@ -59,19 +61,19 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize Wasabi client
-	wasabiClient, err := minio.New(wasabiEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(wasabiAccessKey, wasabiSecretKey, ""),
+	// Initialize s3 client
+	s3Client, err := minio.New(s3Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(s3AccessKey, s3SecretKey, ""),
 		Secure: true,
 	})
 	if err != nil {
-		log.Fatalf("Error initializing Wasabi client: %v", err)
+		log.Fatalf("Error initializing s3 client: %v", err)
 	}
 
-	// List objects in Wasabi folder
+	// List objects in s3 folder
 	ctx := context.Background()
-	wasabiObjects := wasabiClient.ListObjects(ctx, wasabiBucket, minio.ListObjectsOptions{
-		Prefix:    wasabiFolder,
+	s3Objects := s3Client.ListObjects(ctx, s3Bucket, minio.ListObjectsOptions{
+		Prefix:    s3Folder,
 		Recursive: true,
 	})
 
@@ -84,7 +86,7 @@ func main() {
 	// WaitGroup to wait for all conversions to finish
 	var wg sync.WaitGroup
 
-	for obj := range wasabiObjects {
+	for obj := range s3Objects {
 		if obj.Err != nil {
 			log.Printf("Error listing objects: %v", obj.Err)
 			continue
@@ -102,7 +104,7 @@ func main() {
 			if strings.HasSuffix(obj.Key, ".jpg") || strings.HasSuffix(obj.Key, ".jpeg") || strings.HasSuffix(obj.Key, ".png") || strings.HasSuffix(obj.Key, ".gif") {
 				// Check if the file has been converted before
 				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM converted_files WHERE filename = ?", obj.Key).Scan(&count)
+				err := db.QueryRow("SELECT COUNT(*) FROM converted_files WHERE filename = ? AND endpoint = ? AND bucket = ? AND size = ? AND filepath = ?", obj.Key, s3Endpoint, s3Bucket, obj.Size, filepath.Join(s3Folder, obj.Key)).Scan(&count)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -111,13 +113,13 @@ func main() {
 					return
 				}
 				destPath := filepath.Join(destFolder, obj.Key)
-				// Download the image from Wasabi
-				err = wasabiClient.FGetObject(ctx, wasabiBucket, obj.Key, destPath, minio.GetObjectOptions{})
+				// Download the image from s3
+				err = s3Client.FGetObject(ctx, s3Bucket, obj.Key, destPath, minio.GetObjectOptions{})
 				if err != nil {
-					log.Printf("Error downloading object from Wasabi: %v", err)
+					log.Printf("Error downloading object from s3: %v", err)
 					return
 				}
-				log.Printf("Downloaded object from Wasabi: %s", obj.Key)
+				log.Printf("Downloaded object from s3: %s", obj.Key)
 
 				file, err := os.Open(destPath)
 				if err != nil {
@@ -148,15 +150,15 @@ func main() {
 					return
 				}
 
-				// Upload the WebP image to Wasabi with the same filename
-				_, err = wasabiClient.PutObject(ctx, wasabiBucket, obj.Key, bytes.NewReader(webpBytes.Bytes()), int64(webpBytes.Len()), minio.PutObjectOptions{})
+				// Upload the WebP image to s3 with the same filename
+				_, err = s3Client.PutObject(ctx, s3Bucket, obj.Key, bytes.NewReader(webpBytes.Bytes()), int64(webpBytes.Len()), minio.PutObjectOptions{})
 				if err != nil {
-					log.Printf("Error uploading WebP image to Wasabi: %v", err)
+					log.Printf("Error uploading WebP image to s3: %v", err)
 					return
 				}
 
 				// Track the converted file in MariaDB
-				_, err = db.Exec("INSERT INTO converted_files (filename, filepath, size, converted_time) VALUES (?, ?, ?, ?)", obj.Key, filepath.Join(wasabiFolder, obj.Key), obj.Size, time.Now())
+				_, err = db.Exec("INSERT INTO converted_files (filename, filepath, size, converted_time, endpoint, bucket) VALUES (?, ?, ?, ?, ?, ?)", obj.Key, filepath.Join(s3Folder, obj.Key), obj.Size, time.Now(), s3Endpoint, s3Bucket)
 				if err != nil {
 					log.Fatal(err)
 				}
