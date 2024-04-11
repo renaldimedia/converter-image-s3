@@ -144,7 +144,7 @@ func main() {
 
 				// Convert the image to WebP format
 				webpBytes := new(bytes.Buffer)
-				err = webp.Encode(webpBytes, img, &webp.Options{Lossless: false})
+				err = webp.Encode(webpBytes, img, &webp.Options{Lossless: false, Quality: 65})
 				if err != nil {
 					log.Printf("Error converting image to WebP format: %v", err)
 					return
