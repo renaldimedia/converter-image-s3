@@ -18,7 +18,7 @@ This Go script is designed for optimizing image files as part of storage cleanup
 ## Prerequisites
 
 Before running the script, ensure the following are set up:
-- Go programming language (version X.X.X)
+- Go programming language (version 1.21.X +)
 - MariaDB database
 - MinIO client for interaction with Wasabi (adjust accordingly if using a different cloud storage provider)
 - Access to a Wasabi account with API credentials
