@@ -1,42 +1,43 @@
 # Image Conversion Utility
 
-This Go script is a utility for converting images to the WebP format and uploading them to a cloud storage service (Wasabi in this case) while keeping track of the conversions in a MariaDB database. It provides a solution for efficiently converting and managing image files.
+This Go script is designed for optimizing image files as part of storage cleanup for our company. To ensure no files are lost, the script converts images to the WebP format, preserving their quality while reducing file size.
 
-## Features
+## Workflow
 
-- Converts images to WebP format for improved web performance.
-- Utilizes concurrent processing to optimize conversion speed.
-- Integrates with cloud storage (Wasabi) for seamless image uploading.
-- Tracks conversion history using a MariaDB database.
+1. **List Files:** The script scans the storage to identify image files.
+
+2. **Check Conversion Status:** It verifies whether each image has been previously converted by querying a MariaDB database.
+
+3. **Conversion and Upload:**
+   - For unconverted images, the script downloads the file, converts it to WebP format, and uploads the optimized version back to its original path.
+   - Concurrent processing is employed to enhance conversion efficiency.
+
+4. **Cleanup:**
+   - After successful conversion and upload, the local copy of the original image is deleted to save storage space.
 
 ## Prerequisites
 
-Before running the script, ensure you have the following installed and configured:
-
-- Go programming language (at least version 1.21.X)
+Before running the script, ensure the following are set up:
+- Go programming language (version X.X.X)
 - MariaDB database
-- MinIO client for interacting with Wasabi (if using a different cloud storage provider, adjust accordingly)
+- MinIO client for interaction with Wasabi (adjust accordingly if using a different cloud storage provider)
 - Access to a Wasabi account with API credentials
 
 ## Setup
 
-1. Clone the repository:
-
+1. **Clone the Repository:**
 ```bash
 git clone https://github.com/yourusername/your-repo.git
 cd your-repo
 ```
 
-2. Install dependencies:
-
+2. **Install Dependencies:**
 ```bash
 go mod tidy
 ```
 
-3. Set up environment variables:
-
-   Create a `.env` file with the following variables:
-
+3. **Set Environment Variables:**
+   - Create a `.env` file with the required variables:
    ```dotenv
    MYSQL_URL=mysql://username:password@localhost:3306/database
    S3_ENDPOINT=your-wasabi-endpoint
@@ -44,8 +45,8 @@ go mod tidy
    S3_SECRET_KEY=your-wasabi-secret-key
    ```
 
-4. Create a MariaDB database:
-
+4. **Database Setup:**
+   - Create a MariaDB database:
    ```sql
    CREATE DATABASE your_database_name;
    USE your_database_name;
@@ -62,19 +63,6 @@ go mod tidy
 ## Usage
 
 Run the script using the following command:
-
 ```bash
-go run main.go
+go run converters3.go
 ```
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
-
-## Contributions
-
-Contributions are welcome! Feel free to submit issues or pull requests.
-
----
-
-Feel free to customize the README further based on your preferences and additional information about your project.
