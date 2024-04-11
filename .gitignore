@@ -1,0 +1,6 @@
+data
+downloaded/**
+conversion.log
+go.sum
+local.env
+converters3

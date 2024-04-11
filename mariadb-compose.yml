@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  mariadb:
+    image: mariadb:latest
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: Godlike123!
+      MYSQL_DATABASE: converters3
+      MYSQL_USER: renaldimedia
+      MYSQL_PASSWORD: Godlike123!
+    ports:
+      - "3307:3306" # Mapping container port 3306 to host port 3307
+    volumes:
+      - ./data:/var/lib/mysql

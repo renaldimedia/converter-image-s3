@@ -1,0 +1,15 @@
+[Unit]
+Description=Service untuk convert image di s3Storage
+
+[Service]
+Restart=always
+Type=simple
+User=your_username
+Group=your_group
+WorkingDirectory=/root/converters3
+ExecStart=/root/converters3/converters3
+StandardOutput=file:/path/to/your/logfile.log
+StandardError=file:/path/to/your/error.log
+
+[Install]
+WantedBy=multi-user.target
