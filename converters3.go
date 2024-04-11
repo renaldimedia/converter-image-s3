@@ -31,6 +31,7 @@ type TrackRecord struct {
 	ConvertedTime time.Time
 	Endpoint      string
 	Bucket        string
+	SizeAfter	  int64
 }
 
 func main() {
@@ -104,7 +105,7 @@ func main() {
 			if strings.HasSuffix(obj.Key, ".jpg") || strings.HasSuffix(obj.Key, ".jpeg") || strings.HasSuffix(obj.Key, ".png") || strings.HasSuffix(obj.Key, ".gif") {
 				// Check if the file has been converted before
 				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM converted_files WHERE filename = ? AND endpoint = ? AND bucket = ? AND size = ? AND filepath = ?", obj.Key, s3Endpoint, s3Bucket, obj.Size, filepath.Join(s3Folder, obj.Key)).Scan(&count)
+				err := db.QueryRow("SELECT COUNT(*) FROM converted_files WHERE filename = ? AND endpoint = ? AND bucket = ? AND (size = ? OR size_after = ?) AND filepath = ?", obj.Key, s3Endpoint, s3Bucket, obj.Size, obj.Size, filepath.Join(s3Folder, obj.Key)).Scan(&count)
 				if err != nil {
 					log.Fatal(err)
 				}
