@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"image"
+	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -16,8 +17,7 @@ import (
 	"time"
 
 	"github.com/chai2010/webp"
-	_ "github.com/go-sql-driver/mysql" // Importing MySQL driver
-
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -31,7 +31,7 @@ type TrackRecord struct {
 	ConvertedTime time.Time
 	Endpoint      string
 	Bucket        string
-	SizeAfter	  int64
+	SizeAfter     int64
 }
 
 func main() {
@@ -73,109 +73,112 @@ func main() {
 
 	// List objects in s3 folder
 	ctx := context.Background()
-	s3Objects := s3Client.ListObjects(ctx, s3Bucket, minio.ListObjectsOptions{
+	s3ObjectsCh := s3Client.ListObjects(ctx, s3Bucket, minio.ListObjectsOptions{
 		Prefix:    s3Folder,
 		Recursive: true,
 	})
 
-	destFolder := "./downloaded"
-
-	// Create a buffered channel to control the number of concurrent conversions
-	concurrencyLimit := 2
-	concurrencySem := make(chan struct{}, concurrencyLimit)
-
-	// WaitGroup to wait for all conversions to finish
+	// Initialize a worker pool
+	numWorkers := 4
+	workerCh := make(chan minio.ObjectInfo, numWorkers)
 	var wg sync.WaitGroup
+	wg.Add(numWorkers)
 
-	for obj := range s3Objects {
+	// Start worker goroutines
+	for i := 0; i < numWorkers; i++ {
+		go convertWorker(ctx, s3Client, s3Bucket, s3Folder, db, workerCh, &wg)
+	}
+
+	// Iterate over S3 objects and send them to worker goroutines
+	for obj := range s3ObjectsCh {
 		if obj.Err != nil {
 			log.Printf("Error listing objects: %v", obj.Err)
 			continue
 		}
-
-		// Acquire a semaphore to limit concurrency
-		concurrencySem <- struct{}{}
-
-		wg.Add(1)
-		go func(obj minio.ObjectInfo) {
-			defer wg.Done()
-			defer func() { <-concurrencySem }()
-
-			// Check if the object is an image file
-			if strings.HasSuffix(obj.Key, ".jpg") || strings.HasSuffix(obj.Key, ".jpeg") || strings.HasSuffix(obj.Key, ".png") || strings.HasSuffix(obj.Key, ".gif") {
-				// Check if the file has been converted before
-				var count int
-				err := db.QueryRow("SELECT COUNT(*) FROM converted_files WHERE filename = ? AND endpoint = ? AND bucket = ? AND (size = ? OR size_after = ?) AND filepath = ?", obj.Key, s3Endpoint, s3Bucket, obj.Size, obj.Size, filepath.Join(s3Folder, obj.Key)).Scan(&count)
-				if err != nil {
-					log.Fatal(err)
-				}
-				if count > 0 {
-					log.Printf("File '%s' has already been converted. Skipping.", obj.Key)
-					return
-				}
-				destPath := filepath.Join(destFolder, obj.Key)
-				// Download the image from s3
-				err = s3Client.FGetObject(ctx, s3Bucket, obj.Key, destPath, minio.GetObjectOptions{})
-				if err != nil {
-					log.Printf("Error downloading object from s3: %v", err)
-					return
-				}
-				log.Printf("Downloaded object from s3: %s", obj.Key)
-
-				file, err := os.Open(destPath)
-				if err != nil {
-					log.Printf("Error opening downloaded file '%s': %v", destPath, err)
-					return
-				}
-				defer file.Close()
-
-				// Read the image content
-				imageBytes, err := io.ReadAll(file)
-				if err != nil {
-					log.Printf("Error reading image content: %v", err)
-					return
-				}
-
-				// Decode the image
-				img, _, err := image.Decode(bytes.NewReader(imageBytes))
-				if err != nil {
-					log.Printf("Error decoding image: %v", err)
-					return
-				}
-
-				// Convert the image to WebP format
-				webpBytes := new(bytes.Buffer)
-				err = webp.Encode(webpBytes, img, &webp.Options{Lossless: false, Quality: 65})
-				if err != nil {
-					log.Printf("Error converting image to WebP format: %v", err)
-					return
-				}
-
-				// Upload the WebP image to s3 with the same filename
-				_, err = s3Client.PutObject(ctx, s3Bucket, obj.Key, bytes.NewReader(webpBytes.Bytes()), int64(webpBytes.Len()), minio.PutObjectOptions{})
-				if err != nil {
-					log.Printf("Error uploading WebP image to s3: %v", err)
-					return
-				}
-
-				// Track the converted file in MariaDB
-				_, err = db.Exec("INSERT INTO converted_files (filename, filepath, size, converted_time, endpoint, bucket, size_after) VALUES (?, ?, ?, ?, ?, ?, ?)", obj.Key, filepath.Join(s3Folder, obj.Key), obj.Size, time.Now(), s3Endpoint, s3Bucket, int64(webpBytes.Len()))
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				log.Printf("Successfully converted and uploaded %s to WebP format", obj.Key)
-
-				err = os.Remove(destPath) // Delete the downloaded file
-				if err != nil {
-					log.Printf("Error deleting file: %v", err)
-					return
-				}
-				log.Printf("File deleted successfully: %s", destPath)
-			}
-		}(obj)
+		workerCh <- obj
 	}
 
-	// Wait for all conversions to finish
+	// Wait for all worker goroutines to finish
 	wg.Wait()
+	close(workerCh)
+}
+
+func convertWorker(ctx context.Context, s3Client *minio.Client, s3Bucket, s3Folder string, db *sql.DB, workerCh <-chan minio.ObjectInfo, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for obj := range workerCh {
+		err := convertAndUpload(ctx, s3Client, s3Bucket, s3Folder, db, obj)
+		if err != nil {
+			log.Printf("Error processing object '%s': %v", obj.Key, err)
+		}
+	}
+}
+
+func convertAndUpload(ctx context.Context, s3Client *minio.Client, s3Bucket, s3Folder string, db *sql.DB, obj minio.ObjectInfo) error {
+	if !isImageFile(obj.Key) {
+		return nil
+	}
+
+	// Check if the file has been converted before
+	var count int
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM converted_files WHERE filename = ? AND endpoint = ? AND bucket = ? AND (size = ? OR size_after = ?) AND filepath = ?", obj.Key, s3Client.EndpointURL().String(), s3Bucket, obj.Size, obj.Size, filepath.Join(s3Folder, obj.Key)).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to query database: %w", err)
+	}
+	if count > 0 {
+		log.Printf("File '%s' has already been converted. Skipping.", obj.Key)
+		return nil
+	}
+
+	destPath := filepath.Join("downloaded", obj.Key)
+
+	// Download the image from S3
+	err = s3Client.FGetObject(ctx, s3Bucket, obj.Key, destPath, minio.GetObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to download object from S3: %w", err)
+	}
+	defer os.Remove(destPath)
+
+	log.Printf("Downloaded object from S3: %s", obj.Key)
+
+	// Read the image content
+	file, err := os.Open(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Decode the image
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	// Convert the image to WebP format
+	var webpBuf bytes.Buffer
+	err = webp.Encode(&webpBuf, img, &webp.Options{Lossless: false, Quality: 65})
+	if err != nil {
+		return fmt.Errorf("failed to convert image to WebP format: %w", err)
+	}
+
+	// Upload the WebP image to S3 with the same filename
+	_, err = s3Client.PutObject(ctx, s3Bucket, obj.Key, &webpBuf, int64(webpBuf.Len()), minio.PutObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to upload WebP image to S3: %w", err)
+	}
+
+	// Track the converted file in MariaDB
+	_, err = db.ExecContext(ctx, "INSERT INTO converted_files (filename, filepath, size, converted_time, endpoint, bucket, size_after) VALUES (?, ?, ?, ?, ?, ?, ?)", obj.Key, filepath.Join(s3Folder, obj.Key), obj.Size, time.Now(), s3Client.EndpointURL().String(), s3Bucket, int64(webpBuf.Len()))
+	if err != nil {
+		return fmt.Errorf("failed to insert record into database: %w", err)
+	}
+
+	log.Printf("Successfully converted and uploaded %s to WebP format", obj.Key)
+
+	return nil
+}
+
+func isImageFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif"
 }
